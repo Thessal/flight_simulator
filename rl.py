@@ -1,30 +1,14 @@
+# https://pettingzoo.farama.org/content/environment_creation/
+import airline
+
 import functools
 
 import gymnasium
 import numpy as np
-from gymnasium.spaces import Discrete
+from gymnasium.spaces import Discrete, Box, Tuple, Sequence
 
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector, wrappers
-
-ROCK = 0
-PAPER = 1
-SCISSORS = 2
-NONE = 3
-MOVES = ["ROCK", "PAPER", "SCISSORS", "None"]
-NUM_ITERS = 100
-REWARD_MAP = {
-    (ROCK, ROCK): (0, 0),
-    (ROCK, PAPER): (-1, 1),
-    (ROCK, SCISSORS): (1, -1),
-    (PAPER, ROCK): (1, -1),
-    (PAPER, PAPER): (0, 0),
-    (PAPER, SCISSORS): (-1, 1),
-    (SCISSORS, ROCK): (-1, 1),
-    (SCISSORS, PAPER): (1, -1),
-    (SCISSORS, SCISSORS): (0, 0),
-}
-
 
 def env(render_mode=None):
     """
@@ -55,7 +39,7 @@ class raw_env(AECEnv):
 
     metadata = {"render_modes": ["human"], "name": "rps_v2"}
 
-    def __init__(self, render_mode=None):
+    def __init__(self, cfg, render_mode=None):
         """
         The init method takes in environment arguments and
          should define the following attributes:
@@ -68,17 +52,15 @@ class raw_env(AECEnv):
 
         These attributes should not be changed after initialization.
         """
-        self.possible_agents = ["player_" + str(r) for r in range(2)]
-
-        # optional: a mapping between agent name and ID
-        self.agent_name_mapping = dict(
-            zip(self.possible_agents, list(range(len(self.possible_agents))))
-        )
+        self.cfg = cfg         
+        df_airline, df_preference, df_time = airline.get_df()
+        self.airline_info = (df_airline, df_preference, df_time)
+        self.possible_agents = [x for x in df_airline.values]
 
         # optional: we can define the observation and action spaces here as attributes to be used in their corresponding methods
-        self._action_spaces = {agent: Discrete(3) for agent in self.possible_agents}
+        self._action_spaces = {agent: Discrete(3) for agent in self.possible_agents} # policy(FIFO/Maxprofit/Urgentfirst)  
         self._observation_spaces = {
-            agent: Discrete(4) for agent in self.possible_agents
+            agent: Sequence(Box(-60,60)) for agent in self.possible_agents # outgoing 10 airplanes delay
         }
         self.render_mode = render_mode
 
@@ -88,7 +70,7 @@ class raw_env(AECEnv):
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
         # gymnasium spaces are defined and documented here: https://gymnasium.farama.org/api/spaces/
-        return Discrete(4)
+        return Sequence(Box(-60,60)) # time to planned departure
 
     # Action space should be defined here.
     # If your spaces change over time, remove this line (disable caching).
@@ -155,6 +137,7 @@ class raw_env(AECEnv):
         self.state = {agent: NONE for agent in self.agents}
         self.observations = {agent: NONE for agent in self.agents}
         self.num_moves = 0
+        self.sim = airline.Simulator(self.cfg, dfs=self.airline_info, num_plane=100)        
         """
         Our agent_selector utility allows easy cyclic stepping through the agents list.
         """
@@ -224,21 +207,3 @@ class raw_env(AECEnv):
 
         if self.render_mode == "human":
             self.render()
-# To interact with your custom AEC environment, use the following code:
-
-# import aec_rps
-
-# env = aec_rps.env(render_mode="human")
-# env.reset(seed=42)
-
-# for agent in env.agent_iter():
-#     observation, reward, termination, truncation, info = env.last()
-
-#     if termination or truncation:
-#         action = None
-#     else:
-#         # this is where you would insert your policy
-#         action = env.action_space(agent).sample()
-
-#     env.step(action)
-# env.close()

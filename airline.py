@@ -58,7 +58,7 @@ class Airport:
         delays = sorted(delays, reverse=True)
         return delays
     
-    def __init__(self, df_preference, code, std_delay=5, late_threshold=15, holding_period=120, timestep=5, debug=False):
+    def __init__(self, df_preference, code, std_delay=5, late_threshold=15, holding_period=120, timestep=5, capacity=10, debug=False):
         self.late_threshold = 15
         self.holding_period = holding_period # minutes between landing and takeoff. (~TTM)
         self.code = code
@@ -77,6 +77,7 @@ class Airport:
             lambda costs: max(costs,key=lambda x:costs[x]["intrinsic_cost"]), # urgent first, based on arrival time
             lambda costs: max(costs,key=lambda x:costs[x]["est_cost"] - costs[x]["intrinsic_cost"]), # urgent first, based on profit
         ]
+        self.capacity = capacity
         self.policy = 0
         
         self.accumulate_delay = True if code.startswith("RK") else False
@@ -86,10 +87,12 @@ class Airport:
     
     def update(self, df_arrivals):
         if df_arrivals is not None:
-            self._land(df_arrivals)
+            arrival_ids = self._land(df_arrivals)
+        else:
+            arrival_ids = []
         costs = {code: self._est_cost(code) for code,info in self.arrivals.items() if info["takeoff_ready"]<=self.time}
-        if self.debug:
-            print(f"{self.code} Costs : \n{costs}")
+        if self.debug and len(costs)>0:
+            print(f"{self.code}[{self.time}] Costs : \n{costs}")
         plane_id = self._select_plane(costs)
         if plane_id is not None:
             flight_info = self._takeoff(plane_id) #( self.code, next_station, delay )
@@ -99,7 +102,7 @@ class Airport:
             cost = None
         # print(cost) # TODO
         self.time += self.timestep
-        return flight_info
+        return flight_info, arrival_ids
         
     def _select_plane(self, costs):
         if len(costs)>0:
@@ -109,7 +112,11 @@ class Airport:
    
     def _land(self, df_arrivals):
         arrivals = dict()
-        for _, info in df_arrivals.iterrows():
+        arrival_ids = []
+        for idx, info in df_arrivals.iterrows():
+            num_landed = sum(plane["landing_time"]<=self.time for plane in self.arrivals.values())
+            if num_landed + len(arrivals) > self.capacity:
+                break
             arrivals[self.plane_id] = {
                 "landing_plan":info["time_plan"],
                 "landing_time":self.time,
@@ -120,10 +127,12 @@ class Airport:
                 ),
                 }
             self.plane_id += 1
-        if self.debug:
+            arrival_ids.append(idx)
+        if self.debug and len(arrivals)>0:
             debugstr = '\n'.join([str((k,v)) for k,v in arrivals.items()])
-            print(f"{self.code} Landing : \n{debugstr}")
+            print(f"{self.code}[{self.time}] Landing : \n{debugstr}")
         self.arrivals.update(arrivals)
+        return arrival_ids
         
     def _est_cost(self, plane_id):
         x = self.arrivals[plane_id]
@@ -188,44 +197,73 @@ def get_df():
     return df_airports, df_preference, df_time
     
 class Simulator:
-    def __init__(self, cfg, dfs=None, num_plane=100):
+    def __init__(self, cfg, dfs=None, num_plane=100, add_flights=True):
         if dfs is None:
             df_airline, df_preference, df_time = get_df()
         else:
             df_airline, df_preference, df_time = dfs
-        self.sky = Sky(df_time, timestep = cfg["timestep"], debug=False)
-        self.airports = {icao:Airport( df_preference, icao, debug=False, **cfg) for icao in df_airline.values}
-        self.sky.add_random_flight(df_preference, n=num_plane)
+        self.sky = Sky(df_time, timestep = cfg["timestep"])
+        self.airports = {icao:Airport( df_preference, icao, **cfg) for icao in df_airline.values}
+
+        self.add_flights = add_flights 
+        if add_flights:
+            self.sky.add_random_flight(df_preference, n=num_plane)
+    
+    def reset_sky(self):
+        self.sky = Sky(self.sky.df_time, timestep = cfg["timestep"])
         
-    def step():
-        arrivals = sky.arrivals
+    def step(self):
+        arrivals = self.sky.arrivals
         flight_info_lst = []
-        for code, airport in airports.items():
+        arrival_ids = []
+        for code, airport in self.airports.items():
             if code in arrivals:
-                flight_info = airport.update( arrivals[code] )
+                flight_info, landed_ids = airport.update( arrivals[code] )
             else:
-                flight_info = airport.update( None )
+                flight_info, landed_ids = airport.update( None )
             if flight_info is not None:
                 flight_info_lst.append(flight_info)#( self.code, next_station, delay )
-        new_flights = sky.update(flight_info_lst, [i for v in arrivals.values() for i in v.index])
+            arrival_ids.extend(landed_ids)
+        if self.add_flights:
+            new_flights = self.sky.update(flight_info_lst, arrival_ids)
+        else: # debug
+            new_flights = self.sky.update([], arrival_ids)
+
+        # pd.DataFrame({"org":[], "dst":[], "time_plan":[], "delay":[]})
     
     
 if __name__ =="__main__":
     ## Test
     
-    airports, df_preference, df_time = get_df()
-    sky = Sky(df_time)
-    airport_RKSI = Airport( df_preference, "RKSI", debug=True)
-    airports = {"RKSI":airport_RKSI}
-
-    sky.update([("RKPC","RKSI",0),("RKPC","RKSI",10),("RKPC","RKSI",20)],[])
+    dfs = get_df()
+    cfg = {"timestep":5, "capacity":3, "debug":True}
+    sim = Simulator(cfg, dfs, add_flights=False)
+    sim.sky.update(
+        [
+        ("RKPC","RKSI",30),("RKPC","RKSI",10),
+        ("RKPC","RKSI",20),("RKPC","RKSI",20),("RKPC","RKSI",20),("RKPC","RKSI",20)
+        ],[])
 
     for i in range(60):
-        arrivals = sky.arrivals
-        for code, airport in airports.items():
-            if code in arrivals:
-                flight_info = airport.update( arrivals[code] )
-            else:
-                flight_info = airport.update( None )
-        ## sky.update(flight_info_lst, [i for v in arrivals.values() for i in v.index])
-        sky.update([], [i for v in arrivals.values() for i in v.index])
+        sim.step()
+    # airports, df_preference, df_time = get_df()
+    # sky = Sky(df_time)
+    # airport_RKSI = Airport( df_preference, "RKSI", debug=True)
+    # airports = {"RKSI":airport_RKSI}
+
+    # sky.update([
+
+    # for i in range(60):
+    #     arrivals = sky.arrivals
+    #     # print(arrivals)
+    #     # print(sky.df_flight)
+    #     arrival_ids = []
+    #     for code, airport in airports.items():
+    #         if code in arrivals:
+    #             flight_info, landed_ids = airport.update( arrivals[code] )
+    #         else:
+    #             flight_info, landed_ids = airport.update( None )
+    #         arrival_ids.extend(landed_ids)
+    #     ## sky.update(flight_info_lst, [i for v in arrivals.values() for i in v.index])
+    #     print(arrival_ids)
+    #     sky.update([], arrival_ids)
