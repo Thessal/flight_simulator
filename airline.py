@@ -224,19 +224,18 @@ def get_df():
 class Simulator:
     def __init__(self, cfg, dfs=None, add_flights=True):
         self.cfg = cfg
+        self.add_flights = add_flights 
         if dfs is None:
             self.df_airline, self.df_preference, self.df_time = get_df()
         else:
             self.df_airline, self.df_preference, self.df_time = dfs
         self.reset()
 
-        self.add_flights = add_flights 
-        if add_flights:
-            self.sky.add_random_flight(self.df_preference, n=cfg["num_plane"])
-    
     def reset(self):
         self.reset_sky()
         self.reset_airports()
+        if self.add_flights:
+            self.sky.add_random_flight(self.df_preference, n=self.cfg["num_plane"])
 
     def reset_sky(self):
         self.sky = Sky(self.df_time, timestep = self.cfg["timestep"])
@@ -273,9 +272,7 @@ class Simulator:
         cost = lambda x : max(x-15, 0)
         reward = [(x['org'], x['dst'], -cost(x['delay']), cost(x['delay'])) for _,x in new_flights.iterrows()]
         # TODO
-        reward = [x for x in reward if (x[0].startswith("RK") and x[1].startswith("RK"))]
-        for _ in range(10):
-            print(reward)
+        # reward = [x for x in reward if (x[0].startswith("RK") and x[1].startswith("RK"))]
         return reward
     
 if __name__ =="__main__":

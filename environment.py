@@ -197,8 +197,9 @@ class raw_env(AECEnv):
             for agent in self.agents:
                 self.rewards[agent] = 0
             for agent0, agent1, reward0, reward1 in rewards:
-                if (agent0 in self.agents) and (agent1 in self.agents):
+                if (agent0 in self.agents) :
                     self.rewards[agent0] += reward0
+                if (agent1 in self.agents):
                     self.rewards[agent1] += reward1
 
             self.num_moves += 1
