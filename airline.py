@@ -65,7 +65,7 @@ class Sky:
 
 class Airport:
     def observe(self):
-        delays = [ min(60,max(-60, self.time - x["takeoff_plan"])) for x in self.arrivals ]
+        delays = [ min(60,max(-60, self.time - x["takeoff_plan"])) for x in self.arrivals.values() ]
         delays = sorted(delays, reverse=True)
         return delays
     
@@ -239,8 +239,8 @@ class Simulator:
 
         # pd.DataFrame({"org":[], "dst":[], "time_plan":[], "delay":[]})
         cost = lambda x : max(x-15, 0)
-        reward = [(i['org'], i['dst'], -cost(i['delay']), cost(i['delay'])) for i,x in new_flights.iterrows()]
-        reward = [x for x in reward if (x[0].startwsith("RK") and x[1].startswith("RK"))]
+        reward = [(x['org'], x['dst'], -cost(x['delay']), cost(x['delay'])) for _,x in new_flights.iterrows()]
+        reward = [x for x in reward if (x[0].startswith("RK") and x[1].startswith("RK"))]
         return reward
     
 if __name__ =="__main__":

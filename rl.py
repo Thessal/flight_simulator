@@ -12,14 +12,14 @@ from pettingzoo.utils import agent_selector, wrappers
 
 NUM_ITERS = 30000
 
-def env(render_mode=None):
+def env(cfg, render_mode=None):
     """
     The env function often wraps the environment in wrappers by default.
     You can find full documentation for these methods
     elsewhere in the developer documentation.
     """
     internal_render_mode = render_mode if render_mode != "ansi" else "human"
-    env = raw_env(render_mode=internal_render_mode)
+    env = raw_env(cfg=cfg, render_mode=internal_render_mode)
     # This wrapper is only for environments which print results to the terminal
     if render_mode == "ansi":
         env = wrappers.CaptureStdoutWrapper(env)
@@ -59,6 +59,11 @@ class raw_env(AECEnv):
         self.airline_info = (df_airline, df_preference, df_time)
         self.possible_agents = [x for x in df_airline.values if (x.startswith("RK"))]
 
+        # optional: a mapping between agent name and ID
+        self.agent_name_mapping = dict(
+            zip(self.possible_agents, list(range(len(self.possible_agents))))
+        )
+
         # optional: we can define the observation and action spaces here as attributes to be used in their corresponding methods
         self._action_spaces = {agent: Discrete(3) for agent in self.possible_agents} # policy(FIFO/Maxprofit/Urgentfirst)  
         self._observation_spaces = {
@@ -92,7 +97,7 @@ class raw_env(AECEnv):
             return
 
         string = "Current state:\n" + \
-        "\n".join(f"{agent}:{airline.POLICY_NAMES[self.state[self.agents[0]]]}" for agent in self.possible_agent)
+        "\n".join(f"{agent}:{airline.POLICY_NAMES[self.state[self.agents[0]]]}" for agent in self.agents)
         print(string)
 
     def observe(self, agent):
@@ -181,11 +186,12 @@ class raw_env(AECEnv):
             #     (self.state[self.agents[0]], self.state[self.agents[1]])
             # ]
             rewards = self.sim.step()
-            for agent in self.possible_agents:
+            for agent in self.agents:
                 self.rewards[agent] = 0
             for agent0, agent1, reward0, reward1 in rewards:
-                self.rewards[agent0] += reward0
-                self.rewards[agent1] += reward1
+                if (agent0 in self.agents) and (agent1 in self.agents):
+                    self.rewards[agent0] += reward0
+                    self.rewards[agent1] += reward1
 
             self.num_moves += 1
             # The truncations dictionary must be updated for all players.
@@ -195,12 +201,10 @@ class raw_env(AECEnv):
 
             # observe the current state
             for i in self.agents:
-                self.observations[i] = self.state[
-                    self.agents[1 - self.agent_name_mapping[i]]
-                ]
+                self.observations[i] = self.sim.airports[i].observe()
         else:
             # necessary so that observe() returns a reasonable observation at all times.
-            self.state[self.agents[1 - self.agent_name_mapping[agent]]] = NONE
+            # self.state[self.agents[1 - self.agent_name_mapping[agent]]] = NONE
             # no rewards are allocated until both players give an action
             self._clear_rewards()
 
