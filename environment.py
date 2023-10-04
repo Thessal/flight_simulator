@@ -9,6 +9,7 @@ from gymnasium.spaces import Discrete, Box, Tuple, Sequence
 
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector, wrappers
+import numpy as np
 
 NUM_ITERS = 30000
 
@@ -19,7 +20,7 @@ def env(cfg, render_mode=None):
     elsewhere in the developer documentation.
     """
     internal_render_mode = render_mode if render_mode != "ansi" else "human"
-    env = raw_env(cfg=cfg, render_mode=internal_render_mode)
+    env = raw_env(cfg, render_mode=internal_render_mode)
     # This wrapper is only for environments which print results to the terminal
     if render_mode == "ansi":
         env = wrappers.CaptureStdoutWrapper(env)
@@ -53,8 +54,7 @@ class raw_env(AECEnv):
         If these methods are not overridden, spaces will be inferred from self.observation_spaces/action_spaces, raising a warning.
 
         These attributes should not be changed after initialization.
-        """
-        self.cfg = cfg         
+        """      
         df_airline, df_preference, df_time = airline.get_df()
         self.airline_info = (df_airline, df_preference, df_time)
         self.possible_agents = [x for x in df_airline.values if (x.startswith("RK"))]
@@ -65,11 +65,14 @@ class raw_env(AECEnv):
         )
 
         # optional: we can define the observation and action spaces here as attributes to be used in their corresponding methods
-        self._action_spaces = {agent: Discrete(3) for agent in self.possible_agents} # policy(FIFO/Maxprofit/Urgentfirst)  
+        # self._action_spaces = {agent: Discrete(3) for agent in self.possible_agents} # policy(FIFO/Maxprofit/Urgentfirst)  
+        self._action_spaces = {agent: Tuple((Discrete(3),)) for agent in self.possible_agents} # policy(FIFO/Maxprofit/Urgentfirst)  
         self._observation_spaces = {
-            agent: Sequence(Box(-60,60)) for agent in self.possible_agents # outgoing 10 airplanes delay
+            # agent: Sequence(Box(-60,60)) for agent in self.possible_agents # outgoing 10 airplanes delay
+            agent: Tuple((Box(0,10), Box(-60,60))) for agent in self.possible_agents # outgoing airplane count, total delay
         }
         self.render_mode = render_mode
+        self.sim = airline.Simulator(cfg, dfs=self.airline_info) 
 
     # Observation space should be defined here.
     # lru_cache allows observation and action spaces to be memoized, reducing clock cycles required to get each agent's space.
@@ -77,13 +80,15 @@ class raw_env(AECEnv):
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
         # gymnasium spaces are defined and documented here: https://gymnasium.farama.org/api/spaces/
-        return Sequence(Box(-60,60)) # time to planned departure
+        # return Sequence(Box(-60,60)) # time to planned departure
+        return Tuple((Box(0,10), Box(-60,60))) # outgoing airplane count, total delay
 
     # Action space should be defined here.
     # If your spaces change over time, remove this line (disable caching).
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
-        return Discrete(3)
+        # return Discrete(3)
+        return Tuple((Discrete(3),))
 
     def render(self):
         """
@@ -107,7 +112,7 @@ class raw_env(AECEnv):
         at any time after reset() is called.
         """
         # observation of one agent is the previous state of the other
-        return np.array(self.observations[agent])
+        return self.observations[agent] #np.array(self.observations[agent])
 
     def close(self):
         """
@@ -137,10 +142,12 @@ class raw_env(AECEnv):
         self.terminations = {agent: False for agent in self.agents}
         self.truncations = {agent: False for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}
-        self.state = {agent: airline.DEFAULT_POLICY for agent in self.agents}
-        self.observations = {agent: [] for agent in self.agents}
+        self.state = {agent: np.array([airline.DEFAULT_POLICY], dtype=np.int64) for agent in self.agents}
+        self.observations = {agent: (np.array([0.0]),np.array([0.0])) for agent in self.agents}
+        # self.state = {agent: airline.DEFAULT_POLICY for agent in self.agents}
+        # self.observations = {agent: (0.0,0.0) for agent in self.agents}
         self.num_moves = 0
-        self.sim = airline.Simulator(self.cfg, dfs=self.airline_info, num_plane=100)        
+        self.sim.reset()       
         """
         Our agent_selector utility allows easy cyclic stepping through the agents list.
         """
@@ -177,7 +184,8 @@ class raw_env(AECEnv):
         self._cumulative_rewards[agent] = 0
 
         # stores action of current agent
-        self.state[self.agent_selection] = action
+        self.state[agent] = action
+        self.sim.airports[agent].policy = action[0]
 
         # collect reward if it is the last agent to act
         if self._agent_selector.is_last():

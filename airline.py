@@ -12,7 +12,16 @@ import geopy.distance
 #     return ss.norm.cdf(d1) * S - ss.norm.cdf(d2) * K
 #     #pd.DataFrame({ttm:{delay: bs(delay,15,ttm,0.1) for delay in np.arange(0,30,0.1)} for ttm in (1,10,20,30)}).plot()
 
-DEFAULT_POLICY = 0
+CONFIG = {
+        "std_delay":5,
+        "late_threshold":15,
+        "holding_period":120,
+        "timestep":5,
+        "capacity":10,
+        "num_plane":100,
+        "debug":False,
+        }
+DEFAULT_POLICY = np.int64(0)
 POLICY_NAMES = [
     "FIFO",
     "Urgent first",
@@ -65,9 +74,13 @@ class Sky:
 
 class Airport:
     def observe(self):
-        delays = [ min(60,max(-60, self.time - x["takeoff_plan"])) for x in self.arrivals.values() ]
-        delays = sorted(delays, reverse=True)
-        return delays
+        # delays = [ min(60,max(-60, self.time - x["takeoff_plan"])) for x in self.arrivals.values() ]
+        # delays = sorted(delays, reverse=True)
+        delays = [ (x["landing_time"] - x["landing_plan"]) for x in self.landed.values()]
+        return (
+            np.array([min(len(delays),10)], dtype=np.float32), 
+            np.array([max(min(sum(delays),60),-60)], dtype=np.float32)
+            )
     
     def __init__(self, df_preference, code, std_delay=5, late_threshold=15, holding_period=120, timestep=5, capacity=10, debug=False):
         self.late_threshold = 15
@@ -117,12 +130,16 @@ class Airport:
             return self.policy_lst[self.policy](costs)
         else:
             return None
-   
+    
+    @property
+    def landed(self):
+        return {idx:plane for idx, plane in self.arrivals.items() if (plane["landing_time"]<=self.time)}
+
     def _land(self, df_arrivals):
         arrivals = dict()
         arrival_ids = []
         for idx, info in df_arrivals.iterrows():
-            num_landed = sum(plane["landing_time"]<=self.time for plane in self.arrivals.values())
+            num_landed = len(self.landed)
             if num_landed + len(arrivals) > self.capacity:
                 break
             arrivals[self.plane_id] = {
@@ -205,21 +222,36 @@ def get_df():
     return df_airports, df_preference, df_time
     
 class Simulator:
-    def __init__(self, cfg, dfs=None, num_plane=100, add_flights=True):
+    def __init__(self, cfg, dfs=None, add_flights=True):
+        self.cfg = cfg
         if dfs is None:
-            df_airline, df_preference, df_time = get_df()
+            self.df_airline, self.df_preference, self.df_time = get_df()
         else:
-            df_airline, df_preference, df_time = dfs
-        self.sky = Sky(df_time, timestep = cfg["timestep"])
-        self.airports = {icao:Airport( df_preference, icao, **cfg) for icao in df_airline.values}
+            self.df_airline, self.df_preference, self.df_time = dfs
+        self.reset()
 
         self.add_flights = add_flights 
         if add_flights:
-            self.sky.add_random_flight(df_preference, n=num_plane)
+            self.sky.add_random_flight(self.df_preference, n=cfg["num_plane"])
     
+    def reset(self):
+        self.reset_sky()
+        self.reset_airports()
+
     def reset_sky(self):
-        self.sky = Sky(self.sky.df_time, timestep = cfg["timestep"])
-        
+        self.sky = Sky(self.df_time, timestep = self.cfg["timestep"])
+
+    def reset_airports(self):
+        self.airports = {icao:Airport( 
+            self.df_preference, icao, 
+            std_delay = self.cfg["std_delay"], 
+            late_threshold = self.cfg["late_threshold"], 
+            holding_period = self.cfg["holding_period"], 
+            timestep = self.cfg["timestep"], 
+            capacity = self.cfg["capacity"], 
+            debug = self.cfg["debug"]
+            ) for icao in self.df_airline.values}
+
     def step(self):
         arrivals = self.sky.arrivals
         flight_info_lst = []
@@ -240,21 +272,25 @@ class Simulator:
         # pd.DataFrame({"org":[], "dst":[], "time_plan":[], "delay":[]})
         cost = lambda x : max(x-15, 0)
         reward = [(x['org'], x['dst'], -cost(x['delay']), cost(x['delay'])) for _,x in new_flights.iterrows()]
+        # TODO
         reward = [x for x in reward if (x[0].startswith("RK") and x[1].startswith("RK"))]
+        for _ in range(10):
+            print(reward)
         return reward
     
 if __name__ =="__main__":
     ## Test
     
     dfs = get_df()
-    cfg = {"timestep":5, "capacity":3, "debug":True}
-    sim = Simulator(cfg, dfs, add_flights=False)
+    CONFIG.update({"timestep":5, "capacity":3, "debug":True})
+    sim = Simulator(CONFIG, dfs, add_flights=False)
     sim.sky.update(
         [
         ("RKPC","RKSI",30),("RKPC","RKSI",10),
         ("RKPC","RKSI",20),("RKPC","RKSI",20),("RKPC","RKSI",20),("RKPC","RKSI",20)
         ],[])
 
+    actions = {x:0 for x in sim.airports}
     for i in range(60):
         sim.step()
     # airports, df_preference, df_time = get_df()
