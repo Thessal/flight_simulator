@@ -12,6 +12,17 @@ import geopy.distance
 #     return ss.norm.cdf(d1) * S - ss.norm.cdf(d2) * K
 #     #pd.DataFrame({ttm:{delay: bs(delay,15,ttm,0.1) for delay in np.arange(0,30,0.1)} for ttm in (1,10,20,30)}).plot()
 
+DEFAULT_POLICY = 0
+POLICY_NAMES = [
+    "FIFO",
+    "Urgent first",
+    "Maximize buffer"
+]
+POLICY = [
+            lambda costs: min(costs,key=lambda x:costs[x]["landing_time"]), # FIFO
+            lambda costs: max(costs,key=lambda x:costs[x]["intrinsic_cost"]), # urgent first, based on arrival time
+            lambda costs: max(costs,key=lambda x:costs[x]["est_cost"] - costs[x]["intrinsic_cost"]), # urgent first, based on profit
+        ]
 
 class Sky:
     def __init__(self, df_time, timestep = 5, debug=False):
@@ -72,14 +83,11 @@ class Airport:
         # self.df_inventory = pd.DataFrame({"id":[], "dst":[], "time_plan":[], "time_est":[]})
         self.arrivals = {}
         self.debug=debug
-        self.policy_lst = [
-            lambda costs: min(costs,key=lambda x:costs[x]["landing_time"]), # FIFO
-            lambda costs: max(costs,key=lambda x:costs[x]["intrinsic_cost"]), # urgent first, based on arrival time
-            lambda costs: max(costs,key=lambda x:costs[x]["est_cost"] - costs[x]["intrinsic_cost"]), # urgent first, based on profit
-        ]
+        self.policy_lst = POLICY
         self.capacity = capacity
         self.policy = 0
         
+        # consider delay accumulation of Korean airport only
         self.accumulate_delay = True if code.startswith("RK") else False
     
     def calc_delay(self):
@@ -230,7 +238,10 @@ class Simulator:
             new_flights = self.sky.update([], arrival_ids)
 
         # pd.DataFrame({"org":[], "dst":[], "time_plan":[], "delay":[]})
-    
+        cost = lambda x : max(x-15, 0)
+        reward = [(i['org'], i['dst'], -cost(i['delay']), cost(i['delay'])) for i,x in new_flights.iterrows()]
+        reward = [x for x in reward if (x[0].startwsith("RK") and x[1].startswith("RK"))]
+        return reward
     
 if __name__ =="__main__":
     ## Test

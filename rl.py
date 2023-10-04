@@ -10,6 +10,8 @@ from gymnasium.spaces import Discrete, Box, Tuple, Sequence
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector, wrappers
 
+NUM_ITERS = 30000
+
 def env(render_mode=None):
     """
     The env function often wraps the environment in wrappers by default.
@@ -55,7 +57,7 @@ class raw_env(AECEnv):
         self.cfg = cfg         
         df_airline, df_preference, df_time = airline.get_df()
         self.airline_info = (df_airline, df_preference, df_time)
-        self.possible_agents = [x for x in df_airline.values]
+        self.possible_agents = [x for x in df_airline.values if (x.startswith("RK"))]
 
         # optional: we can define the observation and action spaces here as attributes to be used in their corresponding methods
         self._action_spaces = {agent: Discrete(3) for agent in self.possible_agents} # policy(FIFO/Maxprofit/Urgentfirst)  
@@ -89,12 +91,8 @@ class raw_env(AECEnv):
             )
             return
 
-        if len(self.agents) == 2:
-            string = "Current state: Agent1: {} , Agent2: {}".format(
-                MOVES[self.state[self.agents[0]]], MOVES[self.state[self.agents[1]]]
-            )
-        else:
-            string = "Game over"
+        string = "Current state:\n" + \
+        "\n".join(f"{agent}:{airline.POLICY_NAMES[self.state[self.agents[0]]]}" for agent in self.possible_agent)
         print(string)
 
     def observe(self, agent):
@@ -134,8 +132,8 @@ class raw_env(AECEnv):
         self.terminations = {agent: False for agent in self.agents}
         self.truncations = {agent: False for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}
-        self.state = {agent: NONE for agent in self.agents}
-        self.observations = {agent: NONE for agent in self.agents}
+        self.state = {agent: airline.DEFAULT_POLICY for agent in self.agents}
+        self.observations = {agent: [] for agent in self.agents}
         self.num_moves = 0
         self.sim = airline.Simulator(self.cfg, dfs=self.airline_info, num_plane=100)        
         """
@@ -179,9 +177,15 @@ class raw_env(AECEnv):
         # collect reward if it is the last agent to act
         if self._agent_selector.is_last():
             # rewards for all agents are placed in the .rewards dictionary
-            self.rewards[self.agents[0]], self.rewards[self.agents[1]] = REWARD_MAP[
-                (self.state[self.agents[0]], self.state[self.agents[1]])
-            ]
+            # self.rewards[self.agents[0]], self.rewards[self.agents[1]] = REWARD_MAP[
+            #     (self.state[self.agents[0]], self.state[self.agents[1]])
+            # ]
+            rewards = self.sim.step()
+            for agent in self.possible_agents:
+                self.rewards[agent] = 0
+            for agent0, agent1, reward0, reward1 in rewards:
+                self.rewards[agent0] += reward0
+                self.rewards[agent1] += reward1
 
             self.num_moves += 1
             # The truncations dictionary must be updated for all players.
