@@ -10,7 +10,7 @@ from ray.rllib.algorithms.ddpg import DDPGConfig
 from ray.rllib.algorithms.dqn import DQNConfig
 from ray.rllib.env import PettingZooEnv
 from ray.tune.registry import register_env
-
+import multiprocessing
 
 def test_env():
     env = environment.env(airline.CONFIG, render_mode="human")
@@ -60,7 +60,7 @@ def train():
             env_config=cfg,
             )
         # .training(gamma=0.9, lr=0.01)
-        .rollouts(num_rollout_workers=2, rollout_fragment_length=len(policies)*2)
+        .rollouts(num_rollout_workers=int(0.8 * multiprocessing.cpu_count()), rollout_fragment_length=len(policies)*2)
         .multi_agent(
             policies=policies,
             policy_mapping_fn=(lambda agent_id, *args, **kwargs: agent_id),      
@@ -76,7 +76,7 @@ def train():
     tune.run(
         "DQN",
         name="DQN",
-        stop={"timesteps_total": cfg["num_iters"]*12*10},
+        stop={"timesteps_total": cfg["num_iters"]*12*10}, #10y
         checkpoint_freq=10,
         config=config.to_dict(),
         local_dir = os.getcwd()+"/ray_results/"+env_name,
