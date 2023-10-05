@@ -14,6 +14,7 @@ import geopy.distance
 
 CONFIG = {
         "std_delay":10,
+        "buffer_time":10,
         "late_threshold":15,
         "holding_period":120,
         "timestep":10,
@@ -84,7 +85,7 @@ class Airport:
             np.array([max(min(sum(delays),60),-60)], dtype=np.float32)
             )
     
-    def __init__(self, df_preference, code, accumulate_delay=True, std_delay=5, late_threshold=15, holding_period=120, timestep=5, capacity=10, debug=False):
+    def __init__(self, df_preference, code, accumulate_delay=True, std_delay=5, buffer_time=5, late_threshold=15, holding_period=120, timestep=5, capacity=10, debug=False):
         self.late_threshold = 15
         self.holding_period = holding_period # minutes between landing and takeoff. (~TTM)
         self.code = code
@@ -95,6 +96,7 @@ class Airport:
         self.p = pref / (pref.sum())
         self.sigma = std_delay / late_threshold
         self.std_delay = std_delay
+        self.buffer_time = buffer_time
         # self.df_inventory = pd.DataFrame({"id":[], "dst":[], "time_plan":[], "time_est":[]})
         self.arrivals = {}
         self.debug=debug
@@ -102,8 +104,7 @@ class Airport:
         self.capacity = capacity
         self.policy = DEFAULT_POLICY
         
-        # Consider delay accumulation of agent airport only
-        # Otherwise, landing delay is ignored and immediately takeoff
+        # If accumulate_delay is false, landing delay is ignored and immediately takeoff
         self.accumulate_delay = accumulate_delay
     
     def calc_delay(self):
@@ -150,7 +151,8 @@ class Airport:
                 "landing_time":self.time,
                 "takeoff_plan":info["time_plan"] + self.holding_period,
                 "takeoff_ready": (
-                    self.time + self.holding_period + self.calc_delay() if self.accumulate_delay
+                    max(self.time + self.holding_period - self.buffer_time + self.calc_delay(), info["time_plan"] + self.holding_period)
+                    if self.accumulate_delay
                     else info["time_plan"] + self.holding_period + self.calc_delay()
                 ),
                 }
@@ -255,8 +257,9 @@ class Simulator:
     def reset_airports(self):
         self.airports = {icao:Airport( 
             self.df_preference, icao, 
-            accumulate_delay= icao in self.cfg["agent_airports"],
+            accumulate_delay = True, #icao in self.cfg["agent_airports"],
             std_delay = self.cfg["std_delay"], 
+            buffer_time = self.cfg["buffer_time"],
             late_threshold = self.cfg["late_threshold"], 
             holding_period = self.cfg["holding_period"], 
             timestep = self.cfg["timestep"], 
