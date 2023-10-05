@@ -13,13 +13,14 @@ import geopy.distance
 #     #pd.DataFrame({ttm:{delay: bs(delay,15,ttm,0.1) for delay in np.arange(0,30,0.1)} for ttm in (1,10,20,30)}).plot()
 
 CONFIG = {
-        "std_delay":5,
+        "std_delay":10,
         "late_threshold":15,
         "holding_period":120,
-        "timestep":5,
+        "timestep":10,
         "capacity":10,
         "num_plane":100,
         "num_iters":30000,
+        "agent_airports":["RKSI", "RKSS", "RKPK", "RKPC", "RKTN", "RKTU", "RKJB"], # Only agent_airports are optimized, other airports acts as dummy (immediately removes delay)
         "debug":False,
         }
 DEFAULT_POLICY = np.int64(0)
@@ -83,7 +84,7 @@ class Airport:
             np.array([max(min(sum(delays),60),-60)], dtype=np.float32)
             )
     
-    def __init__(self, df_preference, code, std_delay=5, late_threshold=15, holding_period=120, timestep=5, capacity=10, debug=False):
+    def __init__(self, df_preference, code, accumulate_delay=True, std_delay=5, late_threshold=15, holding_period=120, timestep=5, capacity=10, debug=False):
         self.late_threshold = 15
         self.holding_period = holding_period # minutes between landing and takeoff. (~TTM)
         self.code = code
@@ -101,8 +102,9 @@ class Airport:
         self.capacity = capacity
         self.policy = DEFAULT_POLICY
         
-        # consider delay accumulation of Korean airport only
-        self.accumulate_delay = True if code.startswith("RK") else False
+        # Consider delay accumulation of agent airport only
+        # Otherwise, landing delay is ignored and immediately takeoff
+        self.accumulate_delay = accumulate_delay
     
     def calc_delay(self):
         return np.random.normal(0,self.std_delay)
@@ -245,6 +247,7 @@ class Simulator:
     def reset_airports(self):
         self.airports = {icao:Airport( 
             self.df_preference, icao, 
+            accumulate_delay= icao in self.cfg["agent_airports"],
             std_delay = self.cfg["std_delay"], 
             late_threshold = self.cfg["late_threshold"], 
             holding_period = self.cfg["holding_period"], 
@@ -273,8 +276,8 @@ class Simulator:
         # pd.DataFrame({"org":[], "dst":[], "time_plan":[], "delay":[]})
         cost = lambda x : max(x-15, 0)
         reward = [(x['org'], x['dst'], -cost(x['delay']), cost(x['delay'])) for _,x in new_flights.iterrows()]
-        # TODO
-        # reward = [x for x in reward if (x[0].startswith("RK") and x[1].startswith("RK"))]
+        # TODO : modify cost, reward
+        # reward = [x for x in reward if (x[0] in self.cfg["agent_airports"]) and (x[1] in self.cfg["agent_airports"])] ## consider only interaction between korean airports
         return reward
     
 if __name__ =="__main__":

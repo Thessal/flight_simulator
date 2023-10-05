@@ -55,7 +55,7 @@ class raw_env(AECEnv):
         """      
         df_airline, df_preference, df_time = airline.get_df()
         self.airline_info = (df_airline, df_preference, df_time)
-        self.possible_agents = [x for x in df_airline.values if (x.startswith("RK"))]
+        self.possible_agents = cfg["agent_airports"]
 
         # optional: a mapping between agent name and ID
         self.agent_name_mapping = dict(

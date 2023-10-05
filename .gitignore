@@ -1,3 +1,4 @@
 __pycache__
 *.pkl
 ray_results
+bot.py
