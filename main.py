@@ -79,7 +79,7 @@ def train():
         "DQN",
         name="DQN",
         stop={"episodes_total": 12 * 10}, #10y
-        checkpoint_freq=300,
+        checkpoint_freq=3000,
         config=config.to_dict(),
         local_dir = os.getcwd()+"/ray_results/"+env_name,
     )
@@ -89,5 +89,5 @@ def train():
 
     
 if __name__=="__main__":
-#     train()
+    train()
 
