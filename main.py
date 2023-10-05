@@ -53,6 +53,7 @@ def train():
     act_space = env.action_space
     policies = {agent_id:(None, obs_space, act_space, {}) for agent_id in env.get_agent_ids()}
     
+    n_workers = min(multiprocessing.cpu_count(), len(policies))
     config = (
         DQNConfig()
         .environment(
@@ -60,7 +61,8 @@ def train():
             env_config=cfg,
             )
         # .training(gamma=0.9, lr=0.01)
-        .rollouts(num_rollout_workers=int(0.8 * multiprocessing.cpu_count()), rollout_fragment_length=len(policies)*2)
+        .training(train_batch_size=n_workers*len(policies))
+        .rollouts(num_rollout_workers=n_workers, rollout_fragment_length=len(policies))
         .multi_agent(
             policies=policies,
             policy_mapping_fn=(lambda agent_id, *args, **kwargs: agent_id),      
@@ -76,7 +78,7 @@ def train():
     tune.run(
         "DQN",
         name="DQN",
-        stop={"timesteps_total": cfg["num_iters"]*12*10}, #10y
+        stop={"episodes_total": 12 * 10}, #10y
         checkpoint_freq=300,
         config=config.to_dict(),
         local_dir = os.getcwd()+"/ray_results/"+env_name,
