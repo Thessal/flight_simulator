@@ -6,6 +6,8 @@ import ray
 from ray import air, tune
 from ray import tune
 from ray.rllib.algorithms.ppo import PPOConfig
+from ray.rllib.algorithms.ddpg import DDPGConfig
+from ray.rllib.algorithms.dqn import DQNConfig
 from ray.rllib.env import PettingZooEnv
 from ray.tune.registry import register_env
 
@@ -38,9 +40,16 @@ def test_env():
     env.close()
 
 def train():
+
+    # https://github.com/ray-project/ray/blob/master/rllib/examples/multi_agent_independent_learning.py
+    # https://github.com/ray-project/ray/blob/master/rllib/examples/custom_env.py
+    # https://github.com/Farama-Foundation/PettingZoo/blob/master/tutorials/Ray/rllib_leduc_holdem.py
+
+
     ray.init()
 
     cfg = airline.CONFIG
+    cfg["num_iters"] = 1000
     def env_creator(cfg):
         # env = environment.env(cfg, render_mode="human")
         env = environment.env(cfg, render_mode=None)
@@ -52,18 +61,28 @@ def train():
     env = env_creator(cfg)
     obs_space = env.observation_space
     act_space = env.action_space
-    policies = {agent_id:(None, obs_space, act_space, {"gamma": 0.99}) for agent_id in env.get_agent_ids()}
+    policies = {agent_id:(None, obs_space, act_space, {}) for agent_id in env.get_agent_ids()}
     
     config = (
-        PPOConfig()
+        DQNConfig()
+        # PPOConfig()
         .environment(
             env=env_name, 
             env_config=cfg,
-            disable_env_checking=True
+            # disable_env_checking=True
             )
+        # .training(gamma=0.9, lr=0.01, kl_coeff=0.3)
+        # .rollouts(num_rollout_workers=4) 
+        .rollouts(num_rollout_workers=2, rollout_fragment_length=len(policies)*2)
+        # .rollouts(num_rollout_workers=1, rollout_fragment_length=5)
+        # .rollouts(num_rollout_workers=2, rollout_fragment_length='auto')
+        # .training(train_batch_size=2, gamma=0.5, lr=0.1,)
+        # .training(train_batch_size=2, gamma=0.5, lr=0.1, kl_coeff=0.3   )
+        # .rollouts(num_rollout_workers=1, rollout_fragment_length=30)
+        # .training(train_batch_size=200, gamma=0.9, lr=0.01, kl_coeff=0.3)
         .multi_agent(
             policies=policies,
-            policy_mapping_fn=(lambda agent_id, *args, **kwargs: agent_id),
+            policy_mapping_fn=(lambda agent_id, *args, **kwargs: agent_id),      
             )
         .resources(num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0")))
         .debugging(
@@ -71,12 +90,26 @@ def train():
             # log_level="DEBUG"
         ) 
         .framework(framework="torch")
+        # .exploration(
+        #     exploration_config={
+        #         # The Exploration class to use.
+        #         "type": "EpsilonGreedy",
+        #         # Config for the Exploration class' constructor:
+        #         "initial_epsilon": 0.1,
+        #         "final_epsilon": 0.0,
+        #         "epsilon_timesteps": 100000,  # Timesteps over which to anneal epsilon.
+        #     }
+        # )
     )
+    # print(config.to_dict())
+    # raise NotImplementedError()
 
     tune.run(
-        "PPO",
-        name="PPO",
-        stop={"timesteps_total": 10000},
+        # "PPO",
+        # name="PPO",
+        "DQN",
+        name="DQN",
+        stop={"timesteps_total": cfg["num_iters"]*10},
         checkpoint_freq=10,
         config=config.to_dict(),
         local_dir = os.getcwd()+"/ray_results/"+env_name,
@@ -86,7 +119,5 @@ def train():
 if __name__=="__main__":
     # test_env()
     # raise NotImplementedError()
-    # https://github.com/ray-project/ray/blob/master/rllib/examples/multi_agent_independent_learning.py
-    # https://github.com/ray-project/ray/blob/master/rllib/examples/custom_env.py
-    # https://github.com/Farama-Foundation/PettingZoo/blob/master/tutorials/Ray/rllib_leduc_holdem.py
     train()
+

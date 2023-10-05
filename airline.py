@@ -19,6 +19,7 @@ CONFIG = {
         "timestep":5,
         "capacity":10,
         "num_plane":100,
+        "num_iters":30000,
         "debug":False,
         }
 DEFAULT_POLICY = np.int64(0)
@@ -98,7 +99,7 @@ class Airport:
         self.debug=debug
         self.policy_lst = POLICY
         self.capacity = capacity
-        self.policy = 0
+        self.policy = DEFAULT_POLICY
         
         # consider delay accumulation of Korean airport only
         self.accumulate_delay = True if code.startswith("RK") else False
@@ -188,9 +189,10 @@ class Airport:
 
 def get_df():
     import os.path
-    if os.path.isfile("df_preference.pkl") :
-        df_preference = pd.read_pickle("df_preference.pkl")
-        df_airports = pd.read_pickle("df_airports.pkl")
+    path = "/home/jongkook90/riskds/rl/"
+    if os.path.isfile(path+"df_preference.pkl") :
+        df_preference = pd.read_pickle(path+"df_preference.pkl")
+        df_airports = pd.read_pickle(path+"df_airports.pkl")
     else:
         df = pd.read_pickle("analysis.pkl")
         df_preference_stack = df.groupby(["출발지","도착지"])["예상"].count()
@@ -202,8 +204,8 @@ def get_df():
         df_preference.to_pickle("df_preference.pkl")
         df_airports.to_pickle("df_airports.pkl")
 
-    if os.path.isfile("df_time.pkl"):
-        df_time = pd.read_pickle("df_time.pkl")
+    if os.path.isfile(path+"df_time.pkl"):
+        df_time = pd.read_pickle(path+"df_time.pkl")
     else:
         df_loc = pd.read_csv("./kaggle/airports.csv")
         df_loc = df_loc.set_index("ICAO")[["Latitude","Longitude"]]
@@ -251,7 +253,7 @@ class Simulator:
             debug = self.cfg["debug"]
             ) for icao in self.df_airline.values}
 
-    def step(self):
+    def step(self): 
         arrivals = self.sky.arrivals
         flight_info_lst = []
         arrival_ids = []
@@ -287,7 +289,7 @@ if __name__ =="__main__":
         ("RKPC","RKSI",20),("RKPC","RKSI",20),("RKPC","RKSI",20),("RKPC","RKSI",20)
         ],[])
 
-    actions = {x:0 for x in sim.airports}
+    actions = {x:DEFAULT_POLICY for x in sim.airports}
     for i in range(60):
         sim.step()
     # airports, df_preference, df_time = get_df()

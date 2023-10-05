@@ -11,8 +11,6 @@ from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector, wrappers
 import numpy as np
 
-NUM_ITERS = 30000
-
 def env(cfg, render_mode=None):
     """
     The env function often wraps the environment in wrappers by default.
@@ -66,12 +64,13 @@ class raw_env(AECEnv):
 
         # optional: we can define the observation and action spaces here as attributes to be used in their corresponding methods
         # self._action_spaces = {agent: Discrete(3) for agent in self.possible_agents} # policy(FIFO/Maxprofit/Urgentfirst)  
-        self._action_spaces = {agent: Tuple((Discrete(3),)) for agent in self.possible_agents} # policy(FIFO/Maxprofit/Urgentfirst)  
+        self._action_spaces = {agent: Discrete(3) for agent in self.possible_agents} # policy(FIFO/Maxprofit/Urgentfirst)  
         self._observation_spaces = {
             # agent: Sequence(Box(-60,60)) for agent in self.possible_agents # outgoing 10 airplanes delay
-            agent: Tuple((Box(0,10), Box(-60,60))) for agent in self.possible_agents # outgoing airplane count, total delay
+            agent: Tuple((Box(0,10,dtype=np.float32), Box(-60,60,dtype=np.float32))) for agent in self.possible_agents # outgoing airplane count, total delay
         }
         self.render_mode = render_mode
+        self.num_iters = cfg["num_iters"]
         self.sim = airline.Simulator(cfg, dfs=self.airline_info) 
 
     # Observation space should be defined here.
@@ -81,14 +80,14 @@ class raw_env(AECEnv):
     def observation_space(self, agent):
         # gymnasium spaces are defined and documented here: https://gymnasium.farama.org/api/spaces/
         # return Sequence(Box(-60,60)) # time to planned departure
-        return Tuple((Box(0,10), Box(-60,60))) # outgoing airplane count, total delay
+        return Tuple((Box(0,10,dtype=np.float32), Box(-60,60,dtype=np.float32))) # outgoing airplane count, total delay
 
     # Action space should be defined here.
     # If your spaces change over time, remove this line (disable caching).
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
-        # return Discrete(3)
-        return Tuple((Discrete(3),))
+        return Discrete(3)
+        # return Tuple((Discrete(3),))
 
     def render(self):
         """
@@ -143,7 +142,7 @@ class raw_env(AECEnv):
         self.truncations = {agent: False for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}
         self.state = {agent: np.array([airline.DEFAULT_POLICY], dtype=np.int64) for agent in self.agents}
-        self.observations = {agent: (np.array([0.0]),np.array([0.0])) for agent in self.agents}
+        self.observations = {agent: (np.array([0.0], dtype=np.float32),np.array([0.0], dtype=np.float32)) for agent in self.agents}
         # self.state = {agent: airline.DEFAULT_POLICY for agent in self.agents}
         # self.observations = {agent: (0.0,0.0) for agent in self.agents}
         self.num_moves = 0
@@ -185,7 +184,7 @@ class raw_env(AECEnv):
 
         # stores action of current agent
         self.state[agent] = action
-        self.sim.airports[agent].policy = action[0]
+        self.sim.airports[agent].policy = action
 
         # collect reward if it is the last agent to act
         if self._agent_selector.is_last():
@@ -194,18 +193,16 @@ class raw_env(AECEnv):
             #     (self.state[self.agents[0]], self.state[self.agents[1]])
             # ]
             rewards = self.sim.step()
-            for agent in self.agents:
-                self.rewards[agent] = 0
             for agent0, agent1, reward0, reward1 in rewards:
-                if (agent0 in self.agents) :
+                if (agent0 in self.rewards) :
                     self.rewards[agent0] += reward0
-                if (agent1 in self.agents):
+                if (agent1 in self.rewards):
                     self.rewards[agent1] += reward1
 
             self.num_moves += 1
             # The truncations dictionary must be updated for all players.
             self.truncations = {
-                agent: self.num_moves >= NUM_ITERS for agent in self.agents
+                agent: self.num_moves >= self.num_iters for agent in self.agents
             }
 
             # observe the current state
@@ -214,6 +211,9 @@ class raw_env(AECEnv):
         else:
             # necessary so that observe() returns a reasonable observation at all times.
             # self.state[self.agents[1 - self.agent_name_mapping[agent]]] = NONE
+            # for other_agent in self.agents:
+            #     if agent!=other_agent:
+            #         self.state[other_agent] = np.array([self.sim.airports[other_agent].policy], dtype=np.int64)
             # no rewards are allocated until both players give an action
             self._clear_rewards()
 
