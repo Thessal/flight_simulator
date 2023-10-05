@@ -53,7 +53,7 @@ def train():
     act_space = env.action_space
     policies = {agent_id:(None, obs_space, act_space, {}) for agent_id in env.get_agent_ids()}
     
-    n_workers = min(multiprocessing.cpu_count(), len(policies))
+    n_workers = int(0.8*multiprocessing.cpu_count())
     config = (
         DQNConfig()
         .environment(
@@ -89,5 +89,5 @@ def train():
 
     
 if __name__=="__main__":
-    train()
+#     train()
 

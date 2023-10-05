@@ -226,9 +226,17 @@ def get_df():
     return df_airports, df_preference, df_time
     
 class Simulator:
-    def __init__(self, cfg, dfs=None, add_flights=True):
+    def __init__(self, cfg, dfs=None, add_flights=True, save_history=False):
         self.cfg = cfg
         self.add_flights = add_flights 
+        self.history = {
+            "current":
+            {
+                k : {icao:0 for icao in self.cfg["agent_airports"]}
+                for k in ["incoming_count","incoming_delay", "outgoing_count", "outgoing_delay"]
+            }
+        }
+        self.save_history = save_history
         if dfs is None:
             self.df_airline, self.df_preference, self.df_time = get_df()
         else:
@@ -260,6 +268,8 @@ class Simulator:
         arrivals = self.sky.arrivals
         flight_info_lst = []
         arrival_ids = []
+        if self.save_history:
+            df_arrivals = pd.concat(arrivals.values()).copy() if not all((x is None) for x in arrivals.values()) else None
         for code, airport in self.airports.items():
             if code in arrivals:
                 flight_info, landed_ids = airport.update( arrivals[code] )
@@ -278,6 +288,30 @@ class Simulator:
         reward = [(x['org'], x['dst'], -cost(x['delay']), cost(x['delay'])) for _,x in new_flights.iterrows()]
         # TODO : modify cost, reward
         # reward = [x for x in reward if (x[0] in self.cfg["agent_airports"]) and (x[1] in self.cfg["agent_airports"])] ## consider only interaction between korean airports
+        if self.save_history:
+            arrivals = df_arrivals.loc[landed_ids] if (df_arrivals is not None) else None
+            departures = new_flights.copy()
+            if (arrivals is not None) and len(arrivals)>0 :
+                for icao,x in arrivals.groupby("dst"):
+                    if icao in self.history["current"]["incoming_delay"]:
+                        self.history["current"]["incoming_delay"][icao] += x["delay"].sum()
+                        self.history["current"]["incoming_count"][icao] += len(x)
+            if (departures is not None) and len(departures)>0 :
+                for icao,x in departures.groupby("org"):
+                    if icao in self.history["current"]["outgoing_delay"]:
+                        self.history["current"]["outgoing_delay"][icao] += x["delay"].sum()
+                        self.history["current"]["outgoing_count"][icao] += len(x)
+            self.history[self.sky.time] = {
+                "arrivals": arrivals,
+                "departures": departures,
+                "policy":{icao:self.airports[icao].policy.copy() for icao in self.cfg["agent_airports"]},
+                "landed":{icao:self.airports[icao].landed.copy() for icao in self.cfg["agent_airports"]},
+                "incoming_delay": self.history["current"]["incoming_delay"].copy(),
+                "incoming_count": self.history["current"]["incoming_count"].copy(),
+                "outgoing_delay": self.history["current"]["outgoing_delay"].copy(),
+                "outgoing_count": self.history["current"]["outgoing_count"].copy(),
+                "reward": reward,
+                }
         return reward
     
 if __name__ =="__main__":
