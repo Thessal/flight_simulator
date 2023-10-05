@@ -77,7 +77,7 @@ def train():
         "DQN",
         name="DQN",
         stop={"timesteps_total": cfg["num_iters"]*12*10}, #10y
-        checkpoint_freq=10,
+        checkpoint_freq=300,
         config=config.to_dict(),
         local_dir = os.getcwd()+"/ray_results/"+env_name,
     )
