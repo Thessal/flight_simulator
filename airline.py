@@ -14,15 +14,15 @@ import geopy.distance
 
 CONFIG = {
         "std_delay":10,
-        "buffer_time":0,
-        "late_threshold":15,
-        "holding_period":120,
+        "buffer_time":60, # 30 
+        "late_threshold":15, 
+        "holding_period":15,
         "timestep":10,
         "capacity":10,
         "num_plane":100,
         "num_iters":30000,
         "agent_airports":["RKSI", "RKSS", "RKPK", "RKPC", "RKTN", "RKTU", "RKJB"], # Only agent_airports are optimized, other airports acts as dummy (immediately removes delay)
-        "return_p":0.2,
+        "return_p":0.0,
         "debug":False,
         }
 DEFAULT_POLICY = np.int64(0)
@@ -150,9 +150,13 @@ class Airport:
         arrival_ids = []
         for idx, info in df_arrivals.iterrows():
             num_landed = len(self.landed)
+            landed_time = info["time_plan"]+info["delay"] # assuming no delay during flight
             if num_landed + len(arrivals) > self.capacity:
                 break
-            landed_time = info["time_plan"]+info["delay"] # assuming no delay during flight
+            elif landed_time > self.time : 
+                continue
+            landed_time = max(landed_time, self.time-self.timestep)
+
             takeoff_plan = info["time_plan"] + self.holding_period
             arrivals[self.plane_id] = {
                 "origin":info["org"],
