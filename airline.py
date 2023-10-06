@@ -14,7 +14,7 @@ import geopy.distance
 
 CONFIG = {
         "std_delay":10,
-        "buffer_time":10,
+        "buffer_time":0,
         "late_threshold":15,
         "holding_period":120,
         "timestep":10,
@@ -22,6 +22,7 @@ CONFIG = {
         "num_plane":100,
         "num_iters":30000,
         "agent_airports":["RKSI", "RKSS", "RKPK", "RKPC", "RKTN", "RKTU", "RKJB"], # Only agent_airports are optimized, other airports acts as dummy (immediately removes delay)
+        "return_p":0.2,
         "debug":False,
         }
 DEFAULT_POLICY = np.int64(0)
@@ -58,10 +59,11 @@ class Sky:
         
     def _new_flight(self, flight_info):
         origin, destination, delay = flight_info
-        fight_time = self.df_time.loc[(origin,destination)]
+        flight_time = self.df_time.loc[(origin,destination)]
         return {
             "org":origin, "dst":destination, 
-            "time_plan":self.time+fight_time, 
+            "time_plan":self.time-delay+flight_time,
+            # "time_plan":self.time+flight_time, 
             "delay":delay}
     
     def add_random_flight(self, df_preference, n):
@@ -85,7 +87,7 @@ class Airport:
             np.array([max(min(sum(delays),60),-60)], dtype=np.float32)
             )
     
-    def __init__(self, df_preference, code, accumulate_delay=True, std_delay=5, buffer_time=5, late_threshold=15, holding_period=120, timestep=5, capacity=10, debug=False):
+    def __init__(self, df_preference, code, accumulate_delay=True, std_delay=5, buffer_time=5, late_threshold=15, holding_period=120, timestep=5, capacity=10, return_p=0.2, debug=False):
         self.late_threshold = 15
         self.holding_period = holding_period # minutes between landing and takeoff. (~TTM)
         self.code = code
@@ -103,6 +105,7 @@ class Airport:
         self.policy_lst = POLICY
         self.capacity = capacity
         self.policy = DEFAULT_POLICY
+        self.return_p = return_p
         
         # If accumulate_delay is false, landing delay is ignored and immediately takeoff
         self.accumulate_delay = accumulate_delay
@@ -111,6 +114,9 @@ class Airport:
         return np.random.normal(0,self.std_delay)
     
     def update(self, df_arrivals):
+        # if self.code == "RKSI" and self.time>2000:
+        #     print(df_arrivals)
+        #     print("debug")
         if df_arrivals is not None:
             arrival_ids = self._land(df_arrivals)
         else:
@@ -146,16 +152,25 @@ class Airport:
             num_landed = len(self.landed)
             if num_landed + len(arrivals) > self.capacity:
                 break
+            landed_time = info["time_plan"]+info["delay"] # assuming no delay during flight
+            takeoff_plan = info["time_plan"] + self.holding_period
             arrivals[self.plane_id] = {
+                "origin":info["org"],
                 "landing_plan":info["time_plan"],
-                "landing_time":self.time,
-                "takeoff_plan":info["time_plan"] + self.holding_period,
+                "landing_time":landed_time,
+                "takeoff_plan":takeoff_plan,
                 "takeoff_ready": (
-                    max(self.time + self.holding_period - self.buffer_time + self.calc_delay(), info["time_plan"] + self.holding_period)
+                    max(
+                        takeoff_plan, 
+                        landed_time + self.holding_period - self.buffer_time + self.calc_delay()
+                    )
+                    # max(self.time + self.holding_period - self.buffer_time + self.calc_delay(), info["time_plan"] + self.holding_period)
                     if self.accumulate_delay
-                    else info["time_plan"] + self.holding_period + self.calc_delay()
+                    else info["time_plan"] + self.holding_period
                 ),
                 }
+            # if self.code=="RKSI" and info["delay"]>10:
+            #     print(info["delay"])
             self.plane_id += 1
             arrival_ids.append(idx)
         if self.debug and len(arrivals)>0:
@@ -174,8 +189,11 @@ class Airport:
     def _takeoff(self, plane_id):
         flight = self.arrivals.pop(plane_id)
         assert(flight["takeoff_ready"]<=self.time)
-        next_station = np.random.choice(self.p.index, p=self.p.values)
-        delay = max(0,self.time-flight["takeoff_plan"])
+        if np.random.random()<self.return_p:
+            next_station = flight["origin"] # Return to where it came from
+        else:
+            next_station = np.random.choice(self.p.index, p=self.p.values)
+        delay = max(-30,flight["takeoff_ready"]-flight["takeoff_plan"])
         info = ( self.code, next_station, delay )
         if self.debug:
             print(f"{self.code} Takeoff : plane_id: {plane_id}, info: {info}")
@@ -264,6 +282,7 @@ class Simulator:
             holding_period = self.cfg["holding_period"], 
             timestep = self.cfg["timestep"], 
             capacity = self.cfg["capacity"], 
+            return_p = self.cfg["return_p"], 
             debug = self.cfg["debug"]
             ) for icao in self.df_airline.values}
 
@@ -292,7 +311,7 @@ class Simulator:
         # TODO : modify cost, reward
         # reward = [x for x in reward if (x[0] in self.cfg["agent_airports"]) and (x[1] in self.cfg["agent_airports"])] ## consider only interaction between korean airports
         if self.save_history:
-            arrivals = df_arrivals.loc[landed_ids] if (df_arrivals is not None) else None
+            arrivals = df_arrivals.loc[arrival_ids] if (df_arrivals is not None) else None
             departures = new_flights.copy()
             if (arrivals is not None) and len(arrivals)>0 :
                 for icao,x in arrivals.groupby("dst"):
@@ -305,6 +324,7 @@ class Simulator:
                         self.history["current"]["outgoing_delay"][icao] += x["delay"].sum()
                         self.history["current"]["outgoing_count"][icao] += len(x)
             self.history[self.sky.time] = {
+                "num_flights":len(self.sky.df_flight),
                 "arrivals": arrivals,
                 "departures": departures,
                 "policy":{icao:self.airports[icao].policy.copy() for icao in self.cfg["agent_airports"]},
@@ -321,16 +341,20 @@ if __name__ =="__main__":
     ## Test
     
     dfs = get_df()
-    CONFIG.update({"timestep":5, "capacity":3, "debug":True})
-    sim = Simulator(CONFIG, dfs, add_flights=False)
-    sim.sky.update(
-        [
-        ("RKPC","RKSI",30),("RKPC","RKSI",10),
-        ("RKPC","RKSI",20),("RKPC","RKSI",20),("RKPC","RKSI",20),("RKPC","RKSI",20)
-        ],[])
+    # config = CONFIG.copy()
+    # config.update({"timestep":5, "capacity":3, "debug":True})
+    # sim = Simulator(config, dfs, add_flights=False)
+    # sim.sky.update(
+    #     [
+    #     ("RKPC","RKSI",30),("RKPC","RKSI",10),
+    #     ("RKPC","RKSI",20),("RKPC","RKSI",20),("RKPC","RKSI",20),("RKPC","RKSI",20)
+    #     ],[])
+
+    config = {'std_delay': 10, 'buffer_time': 5, 'late_threshold': 15, 'holding_period': 60, 'timestep': 10, 'capacity': 5, 'num_plane': 100, 'num_iters': 30000, 'agent_airports': ['RKSI', 'RKSS', 'RKPK', 'RKPC', 'RKTN', 'RKTU', 'RKJB'], 'return_p': 0, 'debug': False}
+    sim = Simulator(config, dfs, add_flights=True)
 
     actions = {x:DEFAULT_POLICY for x in sim.airports}
-    for i in range(60):
+    for i in range(600):
         sim.step()
     # airports, df_preference, df_time = get_df()
     # sky = Sky(df_time)

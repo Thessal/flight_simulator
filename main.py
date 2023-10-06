@@ -13,7 +13,7 @@ from ray.tune.registry import register_env
 import multiprocessing
 
 def test_env():
-    env = environment.env(airline.CONFIG, render_mode="human")
+    env = environment.env(airline.CONFIG.copy(), render_mode="human")
     env.reset(seed=42)
 
     for agent in env.agent_iter():
@@ -37,7 +37,7 @@ def train():
 
     ray.init()
 
-    cfg = airline.CONFIG
+    cfg = airline.CONFIG.copy()
     sim_days = 30
     cfg["num_iters"] = sim_days * 24 * 60 // cfg["timestep"]
     def env_creator(cfg):
@@ -79,7 +79,8 @@ def train():
         "DQN",
         name="DQN",
         stop={"episodes_total": 12 * 10}, #10y
-        checkpoint_freq=3000,
+        checkpoint_freq=1000,
+        checkpoint_at_end=True,
         config=config.to_dict(),
         local_dir = os.getcwd()+"/ray_results/"+env_name,
     )
